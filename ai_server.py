@@ -1,97 +1,88 @@
 from flask import Flask, request, jsonify
 from ultralytics import YOLO
-import cv2
-import requests
+from collections import deque
 from datetime import datetime
-
-# proverimo da li imamo GPU
-try:
-    import torch
-    HAS_CUDA = torch.cuda.is_available()
-except Exception:
-    HAS_CUDA = False
+import threading
+import requests
+import time
+import mss
+import cv2
+import numpy as np
 
 app = Flask(__name__)
 
-# ucitavanje modela
+# YOLO model
 model = YOLO("yolov8n.pt")
-if HAS_CUDA:
-    model.to("cuda")
-    print("YOLO radi na CUDA")
-else:
-    print("YOLO radi na CPU")
 
-# mapa kamera -> rtsp
-CAMERA_RTSP_MAP = {
-    "CAM_WH_01": "rtsp://user:pass@192.168.1.51/stream1",
-    "CAM_GATE_01": "rtsp://user:pass@192.168.1.52/stream1",
-}
+# probaj CUDA
+try:
+    import torch
+    if torch.cuda.is_available():
+        model.to("cuda")
+        print("YOLO na CUDA")
+    else:
+        print("YOLO na CPU")
+except Exception:
+    print("YOLO na CPU (nema torch)")
 
-# C# middleware
+# OVDE PODESIS GDE JE BVMS VIDEO NA EKRANU
+CAP_REGION = {"top": 150, "left": 300, "width": 800, "height": 450}
+
+# koliko sekundi da cuvamo
+BUFFER_SECONDS = 10
+# koliko fps hocemo iz ekrana
+CAP_FPS = 5
+# znaci ukupno frejmova:
+MAX_FRAMES = BUFFER_SECONDS * CAP_FPS
+
+# u ovaj buffer pisemo frejmove koje BVMS prikazuje
+frame_buffer = deque(maxlen=MAX_FRAMES)
+
+# tvoji template ID-jevi
+TPL_PERSON = 17
+TPL_ANIMAL = 1
+TPL_BIRD = 2
+TPL_GREEN = 5
+
+DOG_CAT_CLASSES = {"dog", "cat"}
+GREEN_CLASSES = {"potted plant", "plant", "tree", "bush"}
+
 MIDDLEWARE_URL = "http://192.168.1.100:5000/ai-event"
 
-# podrazumevano vreme gledanja
-DEFAULT_DURATION = 10  # sekundi
 
-# preskakanje frejmova radi brzine
-FRAME_SKIP = 3
-
-# tvoji sabloni
-TPL_PERSON = 17   # "Nepoznato lice se zadrzava..."
-TPL_ANIMAL = 1    # "Zivotinje"
-TPL_BIRD = 2      # "Ptice"
-TPL_GREEN = 5     # "Zelenilo"
-
-# klase
-GREEN_CLASSES = {"potted plant", "plant", "tree", "bush"}
-DOG_CAT_CLASSES = {"dog", "cat"}
-
-# prag za "ovo je dovoljno ozbiljno da prekidamo odmah"
-EARLY_PERSON_CONF = 0.7
+def screen_capture_worker():
+    """Pozadinski thread koji stalno hvata BVMS prozor."""
+    with mss.mss() as sct:
+        while True:
+            img = sct.grab(CAP_REGION)
+            frame = np.array(img)
+            # BVMS daje BGRA, YOLO ocekuje BGR
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            # smanji da brze radi YOLO
+            frame = cv2.resize(frame, (640, 360))
+            frame_buffer.append(frame)
+            time.sleep(1 / CAP_FPS)
 
 
-def send_to_middleware(template_id, cam_name, confidence):
-    payload = {
-        "template_id": template_id,
-        "camera": cam_name,
-        "confidence": confidence,
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    try:
-        requests.post(MIDDLEWARE_URL, json=payload, timeout=2)
-        print("poslato u middleware:", payload)
-    except Exception as e:
-        print("greska slanja u middleware:", e)
+# pokreni thread
+t = threading.Thread(target=screen_capture_worker, daemon=True)
+t.start()
 
 
-def analyze_camera(rtsp_url, cam_name, duration_sec=10):
-    cap = cv2.VideoCapture(rtsp_url)
-    if not cap.isOpened():
-        print("ne mogu da otvorim rtsp za", cam_name)
+def analyze_frames(cam_name="BVMS_SCREEN"):
+    """Analiziraj ono sto je BVMS prikazao u poslednjih 10 s."""
+    if not frame_buffer:
+        print("nema frejmova u bufferu")
         return
-
-    start_time = datetime.utcnow()
 
     people_conf = []
     animal_conf = []
     bird_conf = []
     green_conf = []
 
-    frame_id = 0
-
-    while (datetime.utcnow() - start_time).total_seconds() < duration_sec:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame_id += 1
-        if frame_id % FRAME_SKIP != 0:
-            continue
-
-        frame = cv2.resize(frame, (640, 360))
-
+    # prodjemo kroz SVE sacuvane frejmove
+    for frame in list(frame_buffer):
         results = model(frame, verbose=False)
-
         for r in results:
             for b in r.boxes:
                 cls_id = int(b.cls[0])
@@ -101,40 +92,20 @@ def analyze_camera(rtsp_url, cam_name, duration_sec=10):
                 if conf < 0.5:
                     continue
 
-                # 1) covek -> cuvamo, ali i proveravamo EARLY EXIT
                 if cls_name == "person":
                     people_conf.append(conf)
-
-                    # EARLY EXIT: ako je ozbiljan covek, odmah saljemo i prekidamo sve
-                    if conf >= EARLY_PERSON_CONF:
-                        cap.release()
-                        send_to_middleware(TPL_PERSON, cam_name, conf)
-                        return
-                    continue
-
-                # 2) pas / macka
-                if cls_name in DOG_CAT_CLASSES:
+                elif cls_name in DOG_CAT_CLASSES:
                     animal_conf.append(conf)
-                    continue
-
-                # 3) ptica
-                if cls_name == "bird":
+                elif cls_name == "bird":
                     bird_conf.append(conf)
-                    continue
-
-                # 4) zelenilo
-                if cls_name in GREEN_CLASSES:
+                elif cls_name in GREEN_CLASSES:
                     green_conf.append(conf)
-                    continue
 
-    cap.release()
-
-    # ako nista nismo nasli
     if not (people_conf or animal_conf or bird_conf or green_conf):
-        print("AI nije nasao nista korisno na", cam_name)
+        print("nista nije nadjeno u BVMS prozoru")
         return
 
-    # PRIORITET posle gledanja celog klipa:
+    # prioritet
     if people_conf:
         template_id = TPL_PERSON
         confidence = max(people_conf)
@@ -148,24 +119,29 @@ def analyze_camera(rtsp_url, cam_name, duration_sec=10):
         template_id = TPL_GREEN
         confidence = max(green_conf)
 
-    send_to_middleware(template_id, cam_name, confidence)
+    payload = {
+        "template_id": template_id,
+        "camera": cam_name,
+        "confidence": confidence,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    try:
+        requests.post(MIDDLEWARE_URL, json=payload, timeout=2)
+        print("poslato u middleware:", payload)
+    except Exception as e:
+        print("greska slanja:", e)
 
 
 @app.route("/bvms-event", methods=["POST"])
 def bvms_event():
     data = request.get_json(force=True)
-    cam_name = data.get("camera")
-    if not cam_name:
-        return jsonify({"error": "camera missing"}), 400
-
-    rtsp = CAMERA_RTSP_MAP.get(cam_name)
-    if not rtsp:
-        return jsonify({"error": "unknown camera"}), 400
-
-    duration = data.get("duration", DEFAULT_DURATION)
-    analyze_camera(rtsp, cam_name, duration_sec=duration)
+    cam_name = data.get("camera", "BVMS_SCREEN")
+    # umesto da otvaramo RTSP, mi analiziramo ono sto vec imamo u bufferu
+    analyze_frames(cam_name)
     return jsonify({"status": "ok"})
 
 
 if __name__ == "__main__":
+    # flask server
     app.run(host="0.0.0.0", port=8000)
