@@ -1,0 +1,49 @@
+[
+  { "id": 0,  "name": "Havarija - poziv rukovodiocu" },
+  { "id": 1,  "name": "Zivotinje" },
+  { "id": 2,  "name": "Ptice" },
+  { "id": 3,  "name": "Insekti (muse, bube, paukova mreza)" },
+  { "id": 4,  "name": "Predmeti (kese, najloni)" },
+  { "id": 5,  "name": "Zelenilo (zbun, trava, grana, lisce)" },
+  { "id": 6,  "name": "Alarm van cuvanog objekta" },
+  { "id": 7,  "name": "Padavine (kisa, sneg, grad)" },
+  { "id": 8,  "name": "Sum u slici (lose osvetljenje)" },
+  { "id": 9,  "name": "Mutna slika, zaklonjen kadar, pomeren ugao kamere, tamper alarm" },
+
+  { "id": 10, "name": "Periodicni pregled stanja na objektu" },
+  { "id": 11, "name": "Nedozvoljena ili sumnjiva aktivnost zaposlenog, gosta, vozila ili radne masine" },
+  { "id": 12, "name": "Nepravilan ili nedozvoljen ulazak/boravak u objektu/prostoru" },
+  { "id": 13, "name": "Zaposleni na pogresnom ili zabranjenom mestu" },
+  { "id": 14, "name": "Materijalno-tehnicka sredstva (MTS) na nedozvoljenom mestu" },
+  { "id": 15, "name": "Previse ljudi na sticenom prostoru" },
+
+  { "id": 16, "name": "Nepoznato lice u prolazu" },
+  { "id": 17, "name": "Nepoznato lice se zadrzava i vrsi sumnjiv rad" },
+  { "id": 18, "name": "Nepoznato lice - razglas poslat, lice napusta objekat" },
+  { "id": 19, "name": "Nepoznato lice - razglas poslat, lice ne napusta objekat - poslata patrola" },
+
+  { "id": 20, "name": "Kretanje gosta van planirane/najavljene putanje" },
+  { "id": 21, "name": "Kretanje gosta u krugu preduzeca van planiranog vremena" },
+
+  { "id": 22, "name": "Zaposleno lice dolazi na posao" },
+  { "id": 23, "name": "Zaposleno lice odlazi sa posla" },
+  { "id": 24, "name": "Zaposleno lice se zadrzava nakon radnog vremena" },
+  { "id": 25, "name": "Zaposleno lice u firmi van radnog vremena" },
+  { "id": 26, "name": "Zaposleno lice van predvidjene putanje" },
+  { "id": 27, "name": "Zaposleno lice u prolazu - redovan rad" },
+
+  { "id": 28, "name": "Sluzbeno vozilo ili radna masina u prolazu za vreme radnog vremena" },
+  { "id": 29, "name": "Sluzbeno vozilo ili radna masina se krece/radi van radnog i planiranog vremena" },
+  { "id": 30, "name": "Sluzbeno vozilo ili radna masina je parkirana na pogresnom/nedozvoljenom mestu" },
+  { "id": 31, "name": "Sluzbeno vozilo ili radna masina se krece van predvidjene putanje" },
+  { "id": 32, "name": "Sluzbeno vozilo ili radna masina obavlja redovan rad" },
+
+  { "id": 33, "name": "Vozilo dobavljaca/kupca/partnera (DKP) van predvidjene putanje" },
+  { "id": 34, "name": "Vozilo DKP se zadrzava/boravi van utvrdjenog mesta" },
+  { "id": 35, "name": "Vozilo DKP u krugu preduzeca van radnog/planskog vremena" },
+  { "id": 36, "name": "Vozilo ili radna masina DKP obavlja planiran rad" },
+
+  { "id": 37, "name": "Privatno vozilo u prolazu za vreme radnog vremena" },
+  { "id": 38, "name": "Privatno vozilo u prolazu van radnog vremena" },
+  { "id": 39, "name": "Privatno vozilo se zadrzava u krugu fabrike" }
+]
