@@ -12,11 +12,10 @@ import numpy as np
 
 app = Flask(__name__)
 
-# 1) UCITAJ YOLO MODEL
-# stavi model koji imas (ti si naveo "yolo11x.pt")
-model = YOLO("yolo11x.pt")
+# 1) MODEL
+model = YOLO("yolov8n.pt")  # promeni ako imas drugi
 
-# 2) PROVERA CUDA
+# 2) CUDA
 try:
     import torch
     if torch.cuda.is_available():
@@ -27,11 +26,10 @@ try:
 except Exception:
     print("YOLO na CPU (nema torch)")
 
-# 3) UCITAJ KONFIG
+# 3) KONFIG
 with open('config.json', 'r') as file:
     data = json.load(file)
 
-# region ekrana gde BVMS prikazuje video
 CAP_REGION = {
     "top": data["CAP_REGION"]["top"],
     "left": data["CAP_REGION"]["left"],
@@ -39,55 +37,39 @@ CAP_REGION = {
     "height": data["CAP_REGION"]["height"]
 }
 
-# koliko sekundi hocemo da snimamo POSLE eventa
-BUFFER_SECONDS = data["SCREEN_OPTIONS"]["BUFFER_SECONDS"]  # npr. 10
-# koliko puta u sekundi da slikamo ekran
-CAP_FPS = data["SCREEN_OPTIONS"]["CAP_FPS"]                # npr. 5
+BUFFER_SECONDS = data["SCREEN_OPTIONS"]["BUFFER_SECONDS"]
+CAP_FPS = data["SCREEN_OPTIONS"]["CAP_FPS"]
 
-# maksimalan broj frejmova koje čuvamo
 MAX_FRAMES = BUFFER_SECONDS * CAP_FPS
 
-# zajednički bafer i lock
 frame_buffer = deque(maxlen=MAX_FRAMES)
 buffer_lock = threading.Lock()
 
-# tvoj middleware (C#)
-MIDDLEWARE_URL = data["MIDDLEWARE_URL"]
+# MIDDLEWARE_URL = data["MIDDLEWARE_URL"]
 
-# template ID-jevi iz tvog sistema
-TPL_PERSON = 17   # covek
-TPL_ANIMAL = 1    # pas/macka -> "Zivotinje"
-TPL_BIRD = 2      # ptice
-TPL_GREEN = 5     # zelenilo (fallback)
+TPL_PERSON = 17
+TPL_ANIMAL = 1
+TPL_BIRD = 2
+TPL_GREEN = 5
+TPL_CAR = 15
 
 DOG_CAT_CLASSES = {"dog", "cat"}
 GREEN_CLASSES = {"potted plant", "plant", "tree", "bush"}
 
 
 def screen_capture_worker():
-    """
-    Pozadinski thread koji stalno hvata BVMS prozor sa ekrana
-    i puni frame_buffer. Mi posle samo uzmemo to iz bafera.
-    """
     with mss.mss() as sct:
         while True:
             img = sct.grab(CAP_REGION)
             frame = np.array(img)
-            # BVMS ide kao BGRA pa ga prebacimo u BGR
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-            # smanji radi brzeg YOLO
             frame = cv2.resize(frame, (640, 360))
-
             with buffer_lock:
                 frame_buffer.append(frame)
-
             time.sleep(1 / CAP_FPS)
 
 
 def analyze_frames(frames, cam_name="BVMS_SCREEN"):
-    """
-    Analiziraj tacno ove frejmove (ne globalni bafer).
-    """
     if not frames:
         print("nema frejmova za analizu")
         return
@@ -96,6 +78,7 @@ def analyze_frames(frames, cam_name="BVMS_SCREEN"):
     animal_conf = []
     bird_conf = []
     green_conf = []
+    car_conf = []
 
     for frame in frames:
         results = model(frame, verbose=False)
@@ -105,12 +88,13 @@ def analyze_frames(frames, cam_name="BVMS_SCREEN"):
                 cls_name = model.names[cls_id]
                 conf = float(b.conf[0])
 
-                # ako je slabo, preskoci
                 if conf < 0.4:
                     continue
 
                 if cls_name == "person":
                     people_conf.append(conf)
+                elif cls_name == "car":
+                    car_conf.append(conf)
                 elif cls_name in DOG_CAT_CLASSES:
                     animal_conf.append(conf)
                 elif cls_name == "bird":
@@ -118,15 +102,16 @@ def analyze_frames(frames, cam_name="BVMS_SCREEN"):
                 elif cls_name in GREEN_CLASSES:
                     green_conf.append(conf)
 
-    # ako bas nista
-    if not (people_conf or animal_conf or bird_conf or green_conf):
+    if not (people_conf or animal_conf or bird_conf or green_conf or car_conf):
         print("nista nije nadjeno u BVMS prozoru")
         return
 
-    # PRIORITETI:
     if people_conf:
         template_id = TPL_PERSON
         confidence = max(people_conf)
+    elif car_conf:
+        template_id = TPL_CAR
+        confidence = max(car_conf)
     elif animal_conf:
         template_id = TPL_ANIMAL
         confidence = max(animal_conf)
@@ -145,45 +130,41 @@ def analyze_frames(frames, cam_name="BVMS_SCREEN"):
     }
 
     try:
-        # kad budes hteo da saljes u C#, samo skini komentar
         # requests.post(MIDDLEWARE_URL, json=payload, timeout=2)
         print("poslato u middleware:", payload)
     except Exception as e:
         print("greska slanja:", e)
 
 
-@app.route("/bvms-event", methods=["POST"])
-def bvms_event():
-    """
-    Kad BVMS kaze "ovaj alarm je dosao",
-    mi od tog trenutka snimamo narednih BUFFER_SECONDS sekundi,
-    pa tek onda analiziramo.
-    """
-    data_req = request.get_json(force=True)
-    cam_name = data_req.get("camera", "BVMS_SCREEN")
-
-    # 1) ocisti sta god da je bilo pre
+def handle_bvms_event(cam_name):
+    # ocisti
     with buffer_lock:
         frame_buffer.clear()
 
-    # 2) cekaj da se napuni narednih X sekundi
+    # cekaj da se napuni
     time.sleep(BUFFER_SECONDS)
 
-    # 3) uzmi to sto se skupilo
+    # uzmi frejmove
     with buffer_lock:
         frames_to_process = list(frame_buffer)
         frame_buffer.clear()
 
-    # 4) analiziraj
     analyze_frames(frames_to_process, cam_name)
 
-    return jsonify({"status": "ok"})
+
+@app.route("/bvms-event", methods=["POST"])
+def bvms_event():
+    data_req = request.get_json(force=True)
+    cam_name = data_req.get("camera", "BVMS_SCREEN")
+
+    th = threading.Thread(target=handle_bvms_event, args=(cam_name,))
+    th.daemon = True
+    th.start()
+
+    return jsonify({"status": "accepted"})
 
 
 if __name__ == "__main__":
-    # pokreni snimanje ekrana u pozadini
     t = threading.Thread(target=screen_capture_worker, daemon=True)
     t.start()
-
-    # pokreni API
     app.run(host="0.0.0.0", port=8000)

@@ -1,0 +1,13 @@
+{
+    "CAP_REGION": {
+        "top": 204,
+        "left": 407,
+        "width": 609,
+        "height": 346
+    },
+
+    "SCREEN_OPTIONS": {
+        "BUFFER_SECONDS": 10,
+        "CAP_FPS": 5
+    }
+}
